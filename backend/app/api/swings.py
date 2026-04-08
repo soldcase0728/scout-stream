@@ -73,8 +73,12 @@ def edit_events(
     er.final_contact_frame = req.final_contact_frame
     er.manual_override = True
     db.commit()
-    db.refresh(swing)
+
     recompute_after_event_edit(db, swing)
+
+    # Reload with fresh relationships after recompute
+    db.expire(swing)
+    swing = _get_swing_for_coach(swing_id, coach, db)
     return _swing_to_response(swing)
 
 
