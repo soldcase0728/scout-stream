@@ -103,6 +103,16 @@ def recompute_after_event_edit(db: DBSession, swing: Swing) -> None:
             )
             db.add(interp)
 
+        # Update saved landmark data at the new event frames for skeleton overlay
+        if swing.processed_data_url:
+            from processing.tasks import _save_landmark_data
+            _save_landmark_data(series, swing.processed_data_url, event_frames={
+                "start": er.final_start_frame,
+                "launch": er.final_launch_frame,
+                "contact": er.final_contact_frame,
+            })
+            logger.info(f"Updated landmark overlay data at new event frames")
+
         db.commit()
         db.refresh(swing)
         logger.info(f"Recompute complete for swing {swing.id}")
