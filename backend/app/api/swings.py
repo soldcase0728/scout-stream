@@ -151,8 +151,9 @@ def get_swing_frame_images(
 ):
     """Extract actual video frame images at event frames as base64 JPEGs.
 
-    Returns the real video frame at Start, Launch, Contact so the frontend
-    can render the skeleton overlay on top of the actual image.
+    Reads frames sequentially (same as motion_adapter) to ensure frame
+    indices match what MediaPipe processed. Using cap.set(POS_FRAMES)
+    can give wrong frames on variable-framerate phone videos.
     """
     import cv2
 
@@ -163,26 +164,26 @@ def get_swing_frame_images(
         raise HTTPException(status_code=400, detail="No events detected yet")
 
     er = swing.event_review
-    frame_indices = {
-        "start": er.final_start_frame,
-        "launch": er.final_launch_frame,
-        "contact": er.final_contact_frame,
+    target_frames = {
+        er.final_start_frame: "start",
+        er.final_launch_frame: "launch",
+        er.final_contact_frame: "contact",
     }
+    max_frame = max(target_frames.keys())
 
     cap = cv2.VideoCapture(swing.source_video_url)
     if not cap.isOpened():
         raise HTTPException(status_code=500, detail="Cannot open video")
 
     result = {}
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    frame_idx = 0
 
-    for event_name, frame_idx in frame_indices.items():
-        if frame_idx >= total_frames:
-            frame_idx = total_frames - 1
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+    while cap.isOpened():
         ret, frame = cap.read()
-        if ret:
-            # Resize for thumbnails (max 400px wide)
+        if not ret:
+            break
+        if frame_idx in target_frames:
+            event_name = target_frames[frame_idx]
             h, w = frame.shape[:2]
             scale = min(400 / w, 500 / h)
             new_w, new_h = int(w * scale), int(h * scale)
@@ -194,6 +195,9 @@ def get_swing_frame_images(
                 "height": new_h,
                 "frame_index": frame_idx,
             }
+        if frame_idx > max_frame:
+            break
+        frame_idx += 1
 
     cap.release()
     return result
