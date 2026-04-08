@@ -32,7 +32,7 @@ make worker
 make frontend
 ```
 
-Open http://localhost:3000 and log in with:
+Open http://localhost:3001 and log in with:
 - Email: `test@scoutstream.com`
 - Password: `password123`
 

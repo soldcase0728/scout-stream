@@ -42,10 +42,10 @@ dev:
 	@echo "  Terminal 1:  make db        # Start PostgreSQL + Redis"
 	@echo "  Terminal 2:  make backend   # Start API at localhost:8000"
 	@echo "  Terminal 3:  make worker    # Start video processing worker"
-	@echo "  Terminal 4:  make frontend  # Start UI at localhost:3000"
+	@echo "  Terminal 4:  make frontend  # Start UI at localhost:3001"
 	@echo ""
 	@echo "Then: make seed              # Create test account"
-	@echo "Then: open http://localhost:3000"
+	@echo "Then: open http://localhost:3001"
 
 # Run backend tests
 test:
