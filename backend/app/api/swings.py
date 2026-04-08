@@ -76,7 +76,17 @@ def edit_events(
     er.manual_override = True
     db.commit()
 
-    recompute_after_event_edit(db, swing)
+    try:
+        recompute_after_event_edit(db, swing)
+    except Exception as e:
+        # Save the event frames even if recompute fails
+        import logging
+        logging.getLogger(__name__).exception(f"Recompute failed: {e}")
+        # Return the swing with updated events but old metrics
+        db.expire(swing)
+        swing = _get_swing_for_coach(swing_id, coach, db)
+        resp = _swing_to_response(swing)
+        return resp
 
     # Reload with fresh relationships after recompute
     db.expire(swing)

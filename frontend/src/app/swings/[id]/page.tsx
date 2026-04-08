@@ -74,13 +74,19 @@ export default function SwingViewerPage() {
   }, [swing?.status, swingId, loadSwing]);
 
   const handleSaveEvents = async () => {
-    await editEvents(swingId, {
-      final_start_frame: eventFrames.start,
-      final_launch_frame: eventFrames.launch,
-      final_contact_frame: eventFrames.contact,
-    });
-    setEditingEvents(false);
-    loadSwing();
+    try {
+      await editEvents(swingId, {
+        final_start_frame: eventFrames.start,
+        final_launch_frame: eventFrames.launch,
+        final_contact_frame: eventFrames.contact,
+      });
+      setEditingEvents(false);
+      loadSwing();
+    } catch (err) {
+      alert('Failed to recompute. Events were saved - try refreshing the page.');
+      setEditingEvents(false);
+      loadSwing();
+    }
   };
 
   const handleSaveNotes = async () => {
