@@ -1,11 +1,15 @@
 .PHONY: setup db backend worker frontend dev test seed clean
 
+# Detect pip/python commands (macOS uses pip3/python3)
+PIP := $(shell command -v pip3 2>/dev/null || command -v pip 2>/dev/null)
+PYTHON := $(shell command -v python3 2>/dev/null || command -v python 2>/dev/null)
+
 # Full setup: install all dependencies
 setup:
 	@echo "==> Copying .env.example to .env (if not exists)..."
 	@test -f .env || cp .env.example .env
 	@echo "==> Installing backend dependencies..."
-	cd backend && pip install -e ".[dev]"
+	cd backend && $(PIP) install -e ".[dev]"
 	@echo "==> Installing frontend dependencies..."
 	cd frontend && npm install
 	@echo "==> Setup complete!"
@@ -18,16 +22,16 @@ db:
 	@echo "==> Waiting for PostgreSQL to be ready..."
 	@sleep 3
 	@echo "==> Running database migrations..."
-	cd backend && alembic upgrade head
+	cd backend && $(PYTHON) -m alembic upgrade head
 	@echo "==> Database ready!"
 
 # Start backend API server
 backend:
-	cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+	cd backend && $(PYTHON) -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 # Start Celery worker for video processing
 worker:
-	cd backend && celery -A processing.worker worker --loglevel=info
+	cd backend && $(PYTHON) -m celery -A processing.worker worker --loglevel=info
 
 # Start frontend dev server
 frontend:
@@ -49,11 +53,11 @@ dev:
 
 # Run backend tests
 test:
-	cd backend && pytest -v
+	cd backend && $(PYTHON) -m pytest -v
 
 # Seed test data (coach account + sample athlete)
 seed:
-	cd backend && python -m scripts.seed_data
+	cd backend && $(PYTHON) -m scripts.seed_data
 
 # Stop infrastructure
 stop:
