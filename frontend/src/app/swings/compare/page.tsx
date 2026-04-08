@@ -1,11 +1,19 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { compareSwings } from '@/lib/api';
 import type { Swing, CheckpointMetrics } from '@/lib/types';
 
 export default function ComparisonPage() {
+  return (
+    <Suspense fallback={<p className="text-gray-500">Loading...</p>}>
+      <ComparisonContent />
+    </Suspense>
+  );
+}
+
+function ComparisonContent() {
   const searchParams = useSearchParams();
   const swingA = searchParams.get('a');
   const swingB = searchParams.get('b');
@@ -70,10 +78,10 @@ export default function ComparisonPage() {
           <tbody>
             {metrics.map((key) => {
               const valA = data.swing_a.metrics?.contact
-                ? (data.swing_a.metrics.contact as Record<string, number>)[key]
+                ? (data.swing_a.metrics.contact as unknown as Record<string, number>)[key]
                 : null;
               const valB = data.swing_b.metrics?.contact
-                ? (data.swing_b.metrics.contact as Record<string, number>)[key]
+                ? (data.swing_b.metrics.contact as unknown as Record<string, number>)[key]
                 : null;
               const diff = valA != null && valB != null ? valB - valA : null;
               return (

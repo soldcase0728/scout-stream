@@ -121,7 +121,7 @@ export default function SwingViewerPage() {
                   />
                 ) : (
                   <p className="text-lg font-mono font-bold">
-                    {swing.events[`final_${event}` as keyof typeof swing.events]}
+                    {swing.events?.[`final_${event}` as keyof typeof swing.events]}
                   </p>
                 )}
               </div>
@@ -256,7 +256,7 @@ function formatMetric(
   key: string
 ): string {
   if (!checkpoint) return '-';
-  const val = (checkpoint as Record<string, number>)[key];
+  const val = (checkpoint as unknown as Record<string, number>)[key];
   if (val === undefined || val === null) return '-';
   return `${val.toFixed(1)}°`;
 }
