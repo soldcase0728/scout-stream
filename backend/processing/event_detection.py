@@ -2,11 +2,15 @@
 
 Detects three public events for each swing:
   - Start: last quiet frame before coordinated movement begins
-  - Launch: first committed attack frame
+  - Launch: first committed attack frame (after full-foot plant)
   - Contact: estimated impact frame
 
 Internally also detects Plant (full-foot stable plant) to assist event logic.
 Plant means full foot down, heel included, stable enough to accept force.
+
+Key design: Contact is detected first (peak delivery), then Launch is found
+by working backward from Contact to find when the committed attack began.
+This prevents triggering Launch too early on gather/stride movement.
 """
 
 from __future__ import annotations
@@ -37,16 +41,24 @@ def detect_events(series: LandmarkTimeSeries, swing_type: str = "regular") -> De
             start_frame=0, launch_frame=n // 2, contact_frame=n - 1, confidence=0.1
         )
 
+    # Detect in this order: Start, Contact, Plant, Launch
+    # Contact first so Launch can anchor backward from it
     start = _detect_start(features, swing_type)
-    plant = _detect_plant(features, swing_type, start)
-    launch = _detect_launch(features, swing_type, start, plant)
-    contact = _detect_contact(features, swing_type, launch)
+    contact = _detect_contact_global(features, swing_type)
+    plant = _detect_plant(features, swing_type, start, contact)
+    launch = _detect_launch(features, swing_type, start, plant, contact)
 
     # Enforce ordering
     if launch <= start:
-        launch = start + max(1, (contact - start) // 2) if contact > start else start + 1
-    if contact <= launch:
-        contact = min(launch + 5, n - 1)
+        launch = start + 1
+    if launch >= contact:
+        launch = contact - 1
+    if contact <= start:
+        contact = n - 1
+        launch = max(start + 1, contact - 5)
+
+    launch = max(0, min(launch, n - 1))
+    contact = max(0, min(contact, n - 1))
 
     confidence = _score_confidence(features, start, launch, contact)
 
@@ -90,6 +102,7 @@ def _compute_features(series: LandmarkTimeSeries) -> dict[str, np.ndarray]:
     shoulder_speed = np.linalg.norm(np.diff(shoulder_pos, axis=0), axis=1)
     wrist_speed = np.linalg.norm(np.diff(wrist_pos, axis=0), axis=1)
     foot_vert_vel = np.diff(lead_foot_pos[:, 1])  # vertical movement
+    foot_horiz_speed = np.linalg.norm(np.diff(lead_foot_pos[:, [0, 2]], axis=0), axis=1)
     pelvis_angular_vel = np.abs(np.diff(pelvis_angle))
     shoulder_angular_vel = np.abs(np.diff(shoulder_angle))
 
@@ -98,6 +111,7 @@ def _compute_features(series: LandmarkTimeSeries) -> dict[str, np.ndarray]:
     shoulder_speed = np.append(shoulder_speed, 0)
     wrist_speed = np.append(wrist_speed, 0)
     foot_vert_vel = np.append(foot_vert_vel, 0)
+    foot_horiz_speed = np.append(foot_horiz_speed, 0)
     pelvis_angular_vel = np.append(pelvis_angular_vel, 0)
     shoulder_angular_vel = np.append(shoulder_angular_vel, 0)
 
@@ -110,6 +124,7 @@ def _compute_features(series: LandmarkTimeSeries) -> dict[str, np.ndarray]:
         "shoulder_speed": shoulder_speed,
         "wrist_speed": wrist_speed,
         "foot_vert_vel": foot_vert_vel,
+        "foot_horiz_speed": foot_horiz_speed,
         "pelvis_angle": pelvis_angle,
         "shoulder_angle": shoulder_angle,
         "pelvis_angular_vel": pelvis_angular_vel,
@@ -134,67 +149,112 @@ def _detect_start(features: dict, swing_type: str) -> int:
     return 0
 
 
-def _detect_plant(features: dict, swing_type: str, start: int) -> int | None:
-    """Detect full-foot stable plant (heel down, stable).
+def _detect_contact_global(features: dict, swing_type: str) -> int:
+    """Estimated impact frame - peak wrist speed in the swing.
 
-    For slappers: plant is only valid when foot is fully down including heel,
-    stable enough to accept force. Toe touch does not count.
+    Detected before Launch so Launch can anchor backward from it.
     """
-    foot_vert = features["foot_vert_vel"]
-    n = len(foot_vert)
-
-    # Look for the frame where lead foot vertical movement settles
-    search_start = start + 3
-    if search_start >= n - 5:
-        return None
-
-    foot_pos = features["lead_foot_pos"][:, 1]  # vertical
-    threshold = np.std(foot_vert[search_start:]) * 0.3
-
-    for i in range(search_start, n - 4):
-        window = np.abs(foot_vert[i : i + 3])
-        if np.all(window < threshold):
-            return i
-
-    return None
-
-
-def _detect_launch(features: dict, swing_type: str, start: int, plant: int | None) -> int:
-    """First committed attack frame - transition from gather to go."""
-    search_from = plant - 2 if plant and plant > start else start + 3
-    search_from = max(search_from, start + 1)
-
-    pelvis_av = features["pelvis_angular_vel"]
-    wrist_s = features["wrist_speed"]
-    n = len(pelvis_av)
-
-    # Launch = first frame after search_from where pelvis angular velocity
-    # and wrist speed both begin sustained increase
-    pav_threshold = np.median(pelvis_av) + np.std(pelvis_av) * 0.8
-    ws_threshold = np.median(wrist_s) + np.std(wrist_s) * 0.5
-
-    for i in range(search_from, n - 3):
-        if pelvis_av[i] > pav_threshold or wrist_s[i] > ws_threshold:
-            # Check it's sustained for 2+ frames
-            if i + 2 < n and (pelvis_av[i + 1] > pav_threshold * 0.7 or wrist_s[i + 1] > ws_threshold * 0.7):
-                return i
-
-    # Fallback: midpoint between start and peak wrist speed
-    peak_wrist = int(np.argmax(wrist_s))
-    return (start + peak_wrist) // 2
-
-
-def _detect_contact(features: dict, swing_type: str, launch: int) -> int:
-    """Estimated impact frame - peak wrist speed after launch."""
     wrist_s = features["wrist_speed"]
     n = len(wrist_s)
 
-    search_region = wrist_s[launch:]
+    # Find peak wrist speed in the second half of the clip
+    # (contact should be in the later portion)
+    search_start = n // 3
+    search_region = wrist_s[search_start:]
     if len(search_region) == 0:
-        return min(launch + 5, n - 1)
+        return n - 1
 
     peak_offset = int(np.argmax(search_region))
-    return launch + peak_offset
+    return search_start + peak_offset
+
+
+def _detect_plant(features: dict, swing_type: str, start: int, contact: int) -> int | None:
+    """Detect full-foot stable plant (heel down, stable).
+
+    Plant is only valid when foot is fully down including heel,
+    stable enough to accept force. Toe touch does not count.
+
+    Search between start and contact for the frame where the lead foot
+    horizontal and vertical movement both settle.
+    """
+    foot_vert = features["foot_vert_vel"]
+    foot_horiz = features["foot_horiz_speed"]
+    n = len(foot_vert)
+
+    search_start = start + 3
+    search_end = contact - 1
+    if search_start >= search_end or search_start >= n - 5:
+        return None
+
+    # Look for frame where both vertical and horizontal foot movement settle
+    vert_threshold = np.std(foot_vert[search_start:search_end]) * 0.4
+    horiz_threshold = np.std(foot_horiz[search_start:search_end]) * 0.4
+
+    # Search backward from contact to find where foot became stable
+    for i in range(search_end - 1, search_start, -1):
+        window_vert = np.abs(foot_vert[max(search_start, i - 2) : i + 1])
+        window_horiz = foot_horiz[max(search_start, i - 2) : i + 1]
+        if np.any(window_vert > vert_threshold) or np.any(window_horiz > horiz_threshold):
+            # This frame has movement - plant is the next stable frame after this
+            plant = min(i + 1, search_end)
+            return plant
+
+    return search_start
+
+
+def _detect_launch(
+    features: dict, swing_type: str, start: int, plant: int | None, contact: int
+) -> int:
+    """First committed attack frame - transition from gather to delivery.
+
+    Strategy: work BACKWARD from contact to find when the explosive
+    acceleration began. This prevents triggering on early gather/stride
+    movement. Launch is the onset of the rapid acceleration phase that
+    leads directly into contact.
+    """
+    pelvis_av = features["pelvis_angular_vel"]
+    wrist_s = features["wrist_speed"]
+    shoulder_av = features["shoulder_angular_vel"]
+    n = len(pelvis_av)
+
+    # Combined delivery signal
+    delivery_signal = (
+        pelvis_av / (pelvis_av.max() + 1e-8) +
+        wrist_s / (wrist_s.max() + 1e-8) +
+        shoulder_av / (shoulder_av.max() + 1e-8)
+    )
+
+    # Walk backward from contact to find where delivery signal drops
+    # below a threshold - that's where the attack acceleration began
+    search_start = max(start + 1, 0)
+    peak_signal = delivery_signal[max(0, contact - 3) : contact + 1].max()
+    launch_threshold = peak_signal * 0.25
+
+    launch = contact - 1
+    for i in range(contact - 1, search_start, -1):
+        if delivery_signal[i] < launch_threshold:
+            launch = i + 1  # Launch is the frame after signal drops below threshold
+            break
+
+    # If plant is detected and is before launch, prefer plant or plant+1
+    # as launch (the committed attack starts at or just after plant)
+    if plant is not None and plant <= launch:
+        # Launch should be at or just after plant
+        # Use the later of: plant-based launch or signal-based launch
+        plant_launch = plant
+        # Check if there's a clear acceleration onset between plant and
+        # the signal-based launch
+        for i in range(plant, min(launch + 3, contact)):
+            if delivery_signal[i] > launch_threshold:
+                plant_launch = i
+                break
+        launch = min(plant_launch, launch)
+
+    # Ensure launch is not too close to or past contact
+    if launch >= contact:
+        launch = contact - max(1, (contact - start) // 10)
+
+    return max(search_start, launch)
 
 
 def _score_confidence(features: dict, start: int, launch: int, contact: int) -> float:
@@ -202,20 +262,28 @@ def _score_confidence(features: dict, start: int, launch: int, contact: int) -> 
     score = 0.5
 
     # Better if there's clear velocity difference between start and contact region
-    pelvis_at_start = features["pelvis_speed"][max(0, start - 2) : start + 2].mean()
-    pelvis_at_launch = features["pelvis_speed"][max(0, launch - 2) : launch + 2].mean()
-    if pelvis_at_launch > pelvis_at_start * 2:
-        score += 0.2
+    start_region = features["pelvis_speed"][max(0, start - 2) : start + 2]
+    launch_region = features["pelvis_speed"][max(0, launch - 2) : launch + 2]
+    if len(start_region) > 0 and len(launch_region) > 0:
+        if launch_region.mean() > start_region.mean() * 1.5:
+            score += 0.15
 
-    # Better if launch < contact and reasonable timing
+    # Better if launch-to-contact timing is reasonable (2-30 frames)
     frames_launch_to_contact = contact - launch
-    if 5 <= frames_launch_to_contact <= 30:
+    if 2 <= frames_launch_to_contact <= 30:
         score += 0.15
 
     # Better if we have clear wrist speed peak
     wrist_peak = features["wrist_speed"][contact]
     wrist_mean = features["wrist_speed"].mean()
     if wrist_peak > wrist_mean * 2:
-        score += 0.15
+        score += 0.1
+
+    # Better if start-to-launch is reasonable portion of total
+    total = contact - start
+    if total > 0:
+        launch_ratio = (launch - start) / total
+        if 0.5 < launch_ratio < 0.98:
+            score += 0.1
 
     return min(score, 1.0)
