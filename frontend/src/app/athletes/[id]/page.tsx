@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { getAthlete, createSession, listSessionSwings } from '@/lib/api';
+import { getAthlete, createSession, listAthleteSessions } from '@/lib/api';
 import type { Athlete, Session } from '@/lib/types';
 
 export default function AthleteDetailPage() {
@@ -15,9 +15,14 @@ export default function AthleteDetailPage() {
 
   useEffect(() => {
     getAthlete(athleteId).then((res) => setAthlete(res.data)).catch(() => {});
-    // Sessions would come from athlete's sessions endpoint
-    // For now we'll handle this through session creation
+    loadSessions();
   }, [athleteId]);
+
+  const loadSessions = () => {
+    listAthleteSessions(athleteId)
+      .then((res) => setSessions(res.data))
+      .catch(() => {});
+  };
 
   const handleCreateSession = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,9 +73,33 @@ export default function AthleteDetailPage() {
         </form>
       )}
 
-      <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500">
-        Create a new session to start analyzing swings.
-      </div>
+      {sessions.length > 0 ? (
+        <div className="space-y-3">
+          {sessions.map((s) => (
+            <a
+              key={s.id}
+              href={`/sessions/${s.id}`}
+              className="block bg-white rounded-lg shadow p-4 hover:bg-gray-50"
+            >
+              <div className="flex justify-between items-center">
+                <span className="font-medium">
+                  {new Date(s.created_at).toLocaleDateString()}
+                </span>
+                {s.session_type && (
+                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
+                    {s.session_type}
+                  </span>
+                )}
+              </div>
+              {s.notes && <p className="text-sm text-gray-500 mt-1">{s.notes}</p>}
+            </a>
+          ))}
+        </div>
+      ) : (
+        <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500">
+          Create a new session to start analyzing swings.
+        </div>
+      )}
     </div>
   );
 }

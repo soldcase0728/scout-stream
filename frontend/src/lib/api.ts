@@ -32,6 +32,8 @@ export const createAthlete = (data: {
 export const getAthlete = (id: string) => api.get(`/athletes/${id}`);
 export const updateAthlete = (id: string, data: Record<string, unknown>) =>
   api.patch(`/athletes/${id}`, data);
+export const listAthleteSessions = (athleteId: string) =>
+  api.get(`/athletes/${athleteId}/sessions`);
 
 // Sessions
 export const createSession = (data: {

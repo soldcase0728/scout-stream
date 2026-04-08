@@ -4,8 +4,10 @@ from sqlalchemy.orm import Session as DBSession
 from app.database import get_db
 from app.models.coach import Coach
 from app.models.athlete import Athlete
+from app.models.session import Session
 from app.api.auth import get_current_coach
 from app.schemas.athlete import AthleteCreate, AthleteUpdate, AthleteResponse
+from app.schemas.session import SessionResponse
 
 router = APIRouter(prefix="/api/athletes", tags=["athletes"])
 
@@ -63,3 +65,24 @@ def update_athlete(
     db.commit()
     db.refresh(athlete)
     return athlete
+
+
+@router.get("/{athlete_id}/sessions", response_model=list[SessionResponse])
+def list_athlete_sessions(
+    athlete_id: str,
+    coach: Coach = Depends(get_current_coach),
+    db: DBSession = Depends(get_db),
+):
+    athlete = (
+        db.query(Athlete)
+        .filter(Athlete.id == athlete_id, Athlete.coach_id == coach.id)
+        .first()
+    )
+    if not athlete:
+        raise HTTPException(status_code=404, detail="Athlete not found")
+    return (
+        db.query(Session)
+        .filter(Session.athlete_id == athlete_id)
+        .order_by(Session.created_at.desc())
+        .all()
+    )
