@@ -50,12 +50,20 @@ export default function AthleteDetailPage() {
 
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-lg font-semibold">Sessions</h2>
-        <button
-          onClick={() => setShowNewSession(!showNewSession)}
-          className="bg-scout-600 text-white px-4 py-2 rounded hover:bg-scout-700 text-sm"
-        >
-          New Session
-        </button>
+        <div className="flex gap-2">
+          <a
+            href={`/athletes/${athleteId}/trends`}
+            className="border border-scout-600 text-scout-600 px-4 py-2 rounded hover:bg-scout-50 text-sm"
+          >
+            View Trends
+          </a>
+          <button
+            onClick={() => setShowNewSession(!showNewSession)}
+            className="bg-scout-600 text-white px-4 py-2 rounded hover:bg-scout-700 text-sm"
+          >
+            New Session
+          </button>
+        </div>
       </div>
 
       {showNewSession && (

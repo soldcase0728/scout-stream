@@ -1,3 +1,6 @@
+import json
+import os
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session as DBSession, joinedload
 
@@ -102,3 +105,33 @@ def compare_swings(
         "swing_a": _swing_to_response(swing_a),
         "swing_b": _swing_to_response(swing_b),
     }
+
+
+@router.get("/{swing_id}/landmarks")
+def get_swing_landmarks(
+    swing_id: str,
+    coach: Coach = Depends(get_current_coach),
+    db: DBSession = Depends(get_db),
+):
+    """Return landmark data at event frames for skeleton overlay."""
+    swing = _get_swing_for_coach(swing_id, coach, db)
+    if not swing.processed_data_url or not os.path.exists(swing.processed_data_url):
+        raise HTTPException(status_code=404, detail="Processed data not available")
+    with open(swing.processed_data_url) as f:
+        data = json.load(f)
+    return data.get("event_landmarks", {})
+
+
+@router.get("/{swing_id}/drills")
+def get_swing_drills(
+    swing_id: str,
+    coach: Coach = Depends(get_current_coach),
+    db: DBSession = Depends(get_db),
+):
+    """Return drill recommendations based on triggered rules for this swing."""
+    swing = _get_swing_for_coach(swing_id, coach, db)
+    if not swing.interpretation:
+        return {"drills": []}
+    rule_ids = [r["rule_id"] for r in (swing.interpretation.rules_triggered or [])]
+    from processing.drills import get_drills_for_rules
+    return {"drills": get_drills_for_rules(rule_ids)}

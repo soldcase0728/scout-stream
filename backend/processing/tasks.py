@@ -38,10 +38,9 @@ def process_swing_task(swing_id: str) -> dict:
         series = extract_landmarks(swing.source_video_url)
         logger.info(f"Extracted {series.num_frames} frames from {swing.source_video_url}")
 
-        # Save processed data
+        # Save processed data (landmarks saved after event detection below)
         os.makedirs(settings.processed_dir, exist_ok=True)
         processed_path = os.path.join(settings.processed_dir, f"{swing_id}.json")
-        _save_landmark_data(series, processed_path)
         swing.processed_data_url = processed_path
 
         # Step 2: Detect events
@@ -65,6 +64,13 @@ def process_swing_task(swing_id: str) -> dict:
             event_confidence=events.confidence,
         )
         db.add(event_review)
+
+        # Save landmark data with event frame landmarks for overlay
+        _save_landmark_data(series, processed_path, event_frames={
+            "start": events.start_frame,
+            "launch": events.launch_frame,
+            "contact": events.contact_frame,
+        })
 
         # Step 3: Compute metrics
         from processing.metrics_engine import compute_all_metrics
@@ -208,13 +214,37 @@ def recompute_swing_task(swing_id: str) -> dict:
         db.close()
 
 
-def _save_landmark_data(series, path: str) -> None:
-    """Save landmark time series as JSON for later reprocessing."""
+def _save_landmark_data(series, path: str, event_frames: dict | None = None) -> None:
+    """Save landmark time series metadata and key-frame landmarks as JSON."""
     data = {
         "frame_rate": series.frame_rate,
         "num_frames": series.num_frames,
         "source": series.source,
         "pipeline_version": series.pipeline_version,
     }
+
+    if event_frames:
+        data["event_landmarks"] = {}
+        for event_name, frame_idx in event_frames.items():
+            if 0 <= frame_idx < len(series.frames):
+                frame = series.frames[frame_idx]
+                data["event_landmarks"][event_name] = _frame_to_dict(frame)
+
     with open(path, "w") as f:
         json.dump(data, f)
+
+
+def _frame_to_dict(frame) -> dict:
+    """Convert a LandmarkFrame to a serializable dict of {name: {x, y, z}}."""
+    from processing.landmark_contract import LANDMARK_INDICES
+
+    result = {}
+    for name in LANDMARK_INDICES:
+        pt = getattr(frame, name)
+        result[name] = {"x": pt.x, "y": pt.y, "z": pt.z}
+    # Add computed midpoints
+    pelvis = frame.pelvis_midpoint()
+    shoulder = frame.shoulder_midpoint()
+    result["pelvis_mid"] = {"x": float(pelvis[0]), "y": float(pelvis[1]), "z": float(pelvis[2])}
+    result["shoulder_mid"] = {"x": float(shoulder[0]), "y": float(shoulder[1]), "z": float(shoulder[2])}
+    return result

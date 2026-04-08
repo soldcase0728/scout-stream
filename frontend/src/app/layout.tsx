@@ -14,6 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <a href="/" className="text-xl font-bold">Scout Stream</a>
           <div className="flex gap-4 text-sm">
             <a href="/athletes" className="hover:text-scout-100">Athletes</a>
+            <a href="/guide" className="hover:text-scout-100">Recording Guide</a>
           </div>
         </nav>
         <main className="max-w-7xl mx-auto px-4 py-6">{children}</main>

@@ -34,6 +34,8 @@ export const updateAthlete = (id: string, data: Record<string, unknown>) =>
   api.patch(`/athletes/${id}`, data);
 export const listAthleteSessions = (athleteId: string) =>
   api.get(`/athletes/${athleteId}/sessions`);
+export const getAthleteTrends = (athleteId: string) =>
+  api.get(`/athletes/${athleteId}/trends`);
 
 // Sessions
 export const createSession = (data: {
@@ -54,6 +56,8 @@ export const uploadSwing = (sessionId: string, file: File, swingType: string) =>
 // Swings
 export const getSwing = (id: string) => api.get(`/swings/${id}`);
 export const getSwingStatus = (id: string) => api.get(`/swings/${id}/status`);
+export const getSwingLandmarks = (id: string) => api.get(`/swings/${id}/landmarks`);
+export const getSwingDrills = (id: string) => api.get(`/swings/${id}/drills`);
 export const editEvents = (id: string, data: {
   final_start_frame: number;
   final_launch_frame: number;

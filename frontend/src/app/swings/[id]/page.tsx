@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import { getSwing, editEvents, updateSwingNotes } from '@/lib/api';
+import { getSwing, getSwingStatus, getSwingLandmarks, getSwingDrills, editEvents, updateSwingNotes } from '@/lib/api';
 import type { Swing, CheckpointMetrics } from '@/lib/types';
+import SkeletonOverlay from '@/components/swings/SkeletonOverlay';
 
 export default function SwingViewerPage() {
   const params = useParams();
@@ -12,12 +13,11 @@ export default function SwingViewerPage() {
   const [notes, setNotes] = useState('');
   const [editingEvents, setEditingEvents] = useState(false);
   const [eventFrames, setEventFrames] = useState({ start: 0, launch: 0, contact: 0 });
+  const [landmarks, setLandmarks] = useState<Record<string, Record<string, {x:number;y:number;z:number}>> | null>(null);
+  const [drills, setDrills] = useState<{name: string; description: string; focus: string; from_rule: string}[]>([]);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    loadSwing();
-  }, [swingId]);
-
-  const loadSwing = () => {
+  const loadSwing = useCallback(() => {
     getSwing(swingId).then((res) => {
       setSwing(res.data);
       setNotes(res.data.notes || '');
@@ -28,8 +28,48 @@ export default function SwingViewerPage() {
           contact: res.data.events.final_contact,
         });
       }
+      // Load landmarks and drills
+      if (res.data.status === 'review_ready') {
+        getSwingLandmarks(swingId).then((lRes) => setLandmarks(lRes.data)).catch(() => {});
+        getSwingDrills(swingId).then((dRes) => setDrills(dRes.data.drills || [])).catch(() => {});
+      }
     });
-  };
+  }, [swingId]);
+
+  // Initial load
+  useEffect(() => {
+    loadSwing();
+  }, [loadSwing]);
+
+  // Auto-poll when processing
+  useEffect(() => {
+    if (!swing) return;
+    const isProcessing = swing.status === 'queued' || swing.status === 'processing' || swing.status === 'uploaded';
+
+    if (isProcessing && !pollRef.current) {
+      pollRef.current = setInterval(() => {
+        getSwingStatus(swingId).then((res) => {
+          if (res.data.status === 'review_ready' || res.data.status === 'failed') {
+            if (pollRef.current) clearInterval(pollRef.current);
+            pollRef.current = null;
+            loadSwing();
+          }
+        });
+      }, 3000);
+    }
+
+    if (!isProcessing && pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, [swing?.status, swingId, loadSwing]);
 
   const handleSaveEvents = async () => {
     await editEvents(swingId, {
@@ -48,16 +88,29 @@ export default function SwingViewerPage() {
   if (!swing) return <p className="text-gray-500">Loading...</p>;
 
   if (swing.status !== 'review_ready') {
+    const isError = swing.status === 'failed';
     return (
       <div className="text-center py-16">
-        <p className="text-lg font-medium">Processing: {swing.status}</p>
-        <p className="text-gray-500 mt-2">Refresh the page to check for updates.</p>
-        <button
-          onClick={loadSwing}
-          className="mt-4 bg-scout-600 text-white px-4 py-2 rounded"
-        >
-          Refresh
-        </button>
+        {isError ? (
+          <>
+            <div className="text-red-500 text-4xl mb-4">!</div>
+            <p className="text-lg font-medium text-red-700">Processing Failed</p>
+            <p className="text-gray-500 mt-2">
+              The video could not be processed. Check video quality and try again.
+            </p>
+          </>
+        ) : (
+          <>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-scout-600 mx-auto mb-4" />
+            <p className="text-lg font-medium">
+              {swing.status === 'queued' ? 'Queued for processing...' : 'Analyzing swing...'}
+            </p>
+            <p className="text-gray-500 mt-2">
+              Extracting landmarks, detecting events, computing metrics.
+            </p>
+            <p className="text-xs text-gray-400 mt-4">Auto-refreshing every 3 seconds</p>
+          </>
+        )}
       </div>
     );
   }
@@ -93,6 +146,33 @@ export default function SwingViewerPage() {
           className="w-full max-h-96 mx-auto"
         />
       </div>
+
+      {/* Skeleton Overlay - Key Frame Checkpoints */}
+      {landmarks && Object.keys(landmarks).length > 0 && (
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="font-semibold mb-4">Body Position at Checkpoints</h2>
+          <p className="text-xs text-gray-500 mb-3">
+            <span className="inline-block w-3 h-0.5 bg-red-500 mr-1 align-middle" /> Trunk
+            <span className="inline-block w-3 h-0.5 bg-blue-500 ml-3 mr-1 align-middle" /> Hips
+            <span className="inline-block w-3 h-0.5 bg-green-500 ml-3 mr-1 align-middle" /> Shoulders
+            <span className="inline-block w-3 h-0.5 bg-orange-500 ml-3 mr-1 align-middle" /> Feet
+          </p>
+          <div className="grid grid-cols-3 gap-4">
+            {(['start', 'launch', 'contact'] as const).map((event) => (
+              <div key={event} className="relative bg-gray-900 rounded overflow-hidden" style={{height: 280}}>
+                {landmarks[event] && (
+                  <SkeletonOverlay
+                    landmarks={landmarks[event]}
+                    width={220}
+                    height={280}
+                    label={event}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Event Frames */}
       {swing.events && (
@@ -160,6 +240,49 @@ export default function SwingViewerPage() {
               <p className="text-gray-900 font-medium">{swing.interpretation.what_to_coach_next}</p>
             </div>
           </div>
+          {/* Drill recommendation from coaching cue */}
+          {swing.interpretation.rules_triggered.length > 0 && (
+            <div className="mt-4 pt-4 border-t">
+              <p className="text-xs text-gray-500 uppercase mb-2">Triggered Rules</p>
+              <div className="flex flex-wrap gap-2">
+                {swing.interpretation.rules_triggered.map((r) => (
+                  <span
+                    key={r.rule_id}
+                    className={`text-xs px-2 py-1 rounded ${
+                      r.priority === 'high'
+                        ? 'bg-red-50 text-red-700'
+                        : r.priority === 'medium'
+                        ? 'bg-yellow-50 text-yellow-700'
+                        : 'bg-green-50 text-green-700'
+                    }`}
+                  >
+                    {r.rule_id}: {r.name.replace(/_/g, ' ')}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Drill Recommendations */}
+      {drills.length > 0 && (
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="font-semibold mb-4">Recommended Drills</h2>
+          <div className="space-y-4">
+            {drills.map((drill, i) => (
+              <div key={i} className="border-l-4 border-scout-500 pl-4">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-medium">{drill.name}</h3>
+                  <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
+                    {drill.from_rule}
+                  </span>
+                </div>
+                <p className="text-sm text-gray-600 mt-1">{drill.description}</p>
+                <p className="text-xs text-gray-400 mt-1">Focus: {drill.focus}</p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -175,23 +298,34 @@ export default function SwingViewerPage() {
                   <th className="py-2 px-4 text-center">Start</th>
                   <th className="py-2 px-4 text-center">Launch</th>
                   <th className="py-2 px-4 text-center">Contact</th>
+                  <th className="py-2 px-4 text-center text-gray-400">Delta S→C</th>
                 </tr>
               </thead>
               <tbody>
-                {metricRows.map((row) => (
-                  <tr key={row.key} className="border-b">
-                    <td className="py-2 pr-4 text-gray-700">{row.label}</td>
-                    <td className="py-2 px-4 text-center font-mono">
-                      {formatMetric(swing.metrics!.start, row.key)}
-                    </td>
-                    <td className="py-2 px-4 text-center font-mono">
-                      {formatMetric(swing.metrics!.launch, row.key)}
-                    </td>
-                    <td className="py-2 px-4 text-center font-mono">
-                      {formatMetric(swing.metrics!.contact, row.key)}
-                    </td>
-                  </tr>
-                ))}
+                {metricRows.map((row) => {
+                  const startVal = getMetricVal(swing.metrics!.start, row.key);
+                  const contactVal = getMetricVal(swing.metrics!.contact, row.key);
+                  const delta = startVal != null && contactVal != null ? contactVal - startVal : null;
+                  return (
+                    <tr key={row.key} className="border-b">
+                      <td className="py-2 pr-4 text-gray-700">{row.label}</td>
+                      <td className="py-2 px-4 text-center font-mono">
+                        {formatMetric(swing.metrics!.start, row.key)}
+                      </td>
+                      <td className="py-2 px-4 text-center font-mono">
+                        {formatMetric(swing.metrics!.launch, row.key)}
+                      </td>
+                      <td className="py-2 px-4 text-center font-mono">
+                        {formatMetric(swing.metrics!.contact, row.key)}
+                      </td>
+                      <td className={`py-2 px-4 text-center font-mono text-xs ${
+                        delta != null && Math.abs(delta) > 8 ? 'text-red-600 font-bold' : 'text-gray-400'
+                      }`}>
+                        {delta != null ? `${delta > 0 ? '+' : ''}${delta.toFixed(1)}` : '-'}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -251,12 +385,14 @@ const metricRows = [
   { key: 'separation', label: 'Separation' },
 ] as const;
 
-function formatMetric(
-  checkpoint: CheckpointMetrics | undefined,
-  key: string
-): string {
-  if (!checkpoint) return '-';
+function getMetricVal(checkpoint: CheckpointMetrics | undefined, key: string): number | null {
+  if (!checkpoint) return null;
   const val = (checkpoint as unknown as Record<string, number>)[key];
-  if (val === undefined || val === null) return '-';
+  return val ?? null;
+}
+
+function formatMetric(checkpoint: CheckpointMetrics | undefined, key: string): string {
+  const val = getMetricVal(checkpoint, key);
+  if (val === null) return '-';
   return `${val.toFixed(1)}°`;
 }
