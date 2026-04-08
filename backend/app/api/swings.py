@@ -1,7 +1,9 @@
 import json
 import os
+import base64
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session as DBSession, joinedload
 
 from app.database import get_db
@@ -139,3 +141,59 @@ def get_swing_drills(
     rule_ids = [r["rule_id"] for r in (swing.interpretation.rules_triggered or [])]
     from processing.drills import get_drills_for_rules
     return {"drills": get_drills_for_rules(rule_ids)}
+
+
+@router.get("/{swing_id}/frames")
+def get_swing_frame_images(
+    swing_id: str,
+    coach: Coach = Depends(get_current_coach),
+    db: DBSession = Depends(get_db),
+):
+    """Extract actual video frame images at event frames as base64 JPEGs.
+
+    Returns the real video frame at Start, Launch, Contact so the frontend
+    can render the skeleton overlay on top of the actual image.
+    """
+    import cv2
+
+    swing = _get_swing_for_coach(swing_id, coach, db)
+    if not swing.source_video_url or not os.path.exists(swing.source_video_url):
+        raise HTTPException(status_code=404, detail="Video not available")
+    if not swing.event_review:
+        raise HTTPException(status_code=400, detail="No events detected yet")
+
+    er = swing.event_review
+    frame_indices = {
+        "start": er.final_start_frame,
+        "launch": er.final_launch_frame,
+        "contact": er.final_contact_frame,
+    }
+
+    cap = cv2.VideoCapture(swing.source_video_url)
+    if not cap.isOpened():
+        raise HTTPException(status_code=500, detail="Cannot open video")
+
+    result = {}
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    for event_name, frame_idx in frame_indices.items():
+        if frame_idx >= total_frames:
+            frame_idx = total_frames - 1
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        ret, frame = cap.read()
+        if ret:
+            # Resize for thumbnails (max 400px wide)
+            h, w = frame.shape[:2]
+            scale = min(400 / w, 500 / h)
+            new_w, new_h = int(w * scale), int(h * scale)
+            resized = cv2.resize(frame, (new_w, new_h))
+            _, buf = cv2.imencode('.jpg', resized, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            result[event_name] = {
+                "image": base64.b64encode(buf).decode('utf-8'),
+                "width": new_w,
+                "height": new_h,
+                "frame_index": frame_idx,
+            }
+
+    cap.release()
+    return result

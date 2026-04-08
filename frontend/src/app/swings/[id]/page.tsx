@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import { getSwing, getSwingStatus, getSwingLandmarks, getSwingDrills, editEvents, updateSwingNotes } from '@/lib/api';
+import { getSwing, getSwingStatus, getSwingLandmarks, getSwingFrameImages, getSwingDrills, editEvents, updateSwingNotes } from '@/lib/api';
 import type { Swing, CheckpointMetrics } from '@/lib/types';
 import SkeletonOverlay from '@/components/swings/SkeletonOverlay';
 
@@ -15,6 +15,7 @@ export default function SwingViewerPage() {
   const [eventFrames, setEventFrames] = useState({ start: 0, launch: 0, contact: 0 });
   const [landmarks, setLandmarks] = useState<Record<string, Record<string, {x:number;y:number;z:number}>> | null>(null);
   const [drills, setDrills] = useState<{name: string; description: string; focus: string; from_rule: string}[]>([]);
+  const [frameImages, setFrameImages] = useState<Record<string, {image: string; width: number; height: number; frame_index: number}> | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadSwing = useCallback(() => {
@@ -28,9 +29,10 @@ export default function SwingViewerPage() {
           contact: res.data.events.final_contact,
         });
       }
-      // Load landmarks and drills
+      // Load landmarks, frame images, and drills
       if (res.data.status === 'review_ready') {
         getSwingLandmarks(swingId).then((lRes) => setLandmarks(lRes.data)).catch(() => {});
+        getSwingFrameImages(swingId).then((fRes) => setFrameImages(fRes.data)).catch(() => {});
         getSwingDrills(swingId).then((dRes) => setDrills(dRes.data.drills || [])).catch(() => {});
       }
     });
@@ -147,8 +149,8 @@ export default function SwingViewerPage() {
         />
       </div>
 
-      {/* Skeleton Overlay - Key Frame Checkpoints */}
-      {landmarks && Object.keys(landmarks).length > 0 && (
+      {/* Body Position at Checkpoints - Video Frame + Skeleton Overlay */}
+      {(frameImages || landmarks) && (
         <div className="bg-white rounded-lg shadow p-6">
           <h2 className="font-semibold mb-4">Body Position at Checkpoints</h2>
           <p className="text-xs text-gray-500 mb-3">
@@ -158,18 +160,30 @@ export default function SwingViewerPage() {
             <span className="inline-block w-3 h-0.5 bg-orange-500 ml-3 mr-1 align-middle" /> Feet
           </p>
           <div className="grid grid-cols-3 gap-4">
-            {(['start', 'launch', 'contact'] as const).map((event) => (
-              <div key={event} className="relative bg-gray-900 rounded overflow-hidden" style={{height: 280}}>
-                {landmarks[event] && (
+            {(['start', 'launch', 'contact'] as const).map((event) => {
+              const fi = frameImages?.[event];
+              const overlayW = fi?.width || 220;
+              const overlayH = fi?.height || 280;
+              return (
+              <div key={event} className="relative bg-gray-900 rounded overflow-hidden" style={{height: overlayH, width: overlayW}}>
+                {fi && (
+                  <img
+                    src={`data:image/jpeg;base64,${fi.image}`}
+                    alt={`${event} frame ${fi.frame_index}`}
+                    className="absolute inset-0 w-full h-full object-cover"
+                  />
+                )}
+                {landmarks?.[event] && (
                   <SkeletonOverlay
                     landmarks={landmarks[event]}
-                    width={220}
-                    height={280}
-                    label={event}
+                    width={overlayW}
+                    height={overlayH}
+                    label={`${event} (f${fi?.frame_index ?? '?'})`}
                   />
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

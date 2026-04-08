@@ -57,6 +57,7 @@ export const uploadSwing = (sessionId: string, file: File, swingType: string) =>
 export const getSwing = (id: string) => api.get(`/swings/${id}`);
 export const getSwingStatus = (id: string) => api.get(`/swings/${id}/status`);
 export const getSwingLandmarks = (id: string) => api.get(`/swings/${id}/landmarks`);
+export const getSwingFrameImages = (id: string) => api.get(`/swings/${id}/frames`);
 export const getSwingDrills = (id: string) => api.get(`/swings/${id}/drills`);
 export const editEvents = (id: string, data: {
   final_start_frame: number;
