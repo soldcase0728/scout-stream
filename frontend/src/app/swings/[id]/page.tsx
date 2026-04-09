@@ -149,7 +149,7 @@ export default function SwingViewerPage() {
       {/* Video Player */}
       <div className="bg-black rounded-lg overflow-hidden">
         <video
-          src={swing.source_video_url}
+          src={swing.source_video_url.replace(/^\.\//, '/')}
           controls
           className="w-full max-h-96 mx-auto"
         />

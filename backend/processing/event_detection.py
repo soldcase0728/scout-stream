@@ -208,16 +208,15 @@ def _detect_launch(
     """First committed attack frame - transition from gather to delivery.
 
     Strategy: work BACKWARD from contact to find when the explosive
-    acceleration began. This prevents triggering on early gather/stride
-    movement. Launch is the onset of the rapid acceleration phase that
-    leads directly into contact.
+    acceleration began. Launch is when the body transitions from
+    gather/movement into committed delivery.
     """
     pelvis_av = features["pelvis_angular_vel"]
     wrist_s = features["wrist_speed"]
     shoulder_av = features["shoulder_angular_vel"]
     n = len(pelvis_av)
 
-    # Combined delivery signal
+    # Combined delivery signal (normalized)
     delivery_signal = (
         pelvis_av / (pelvis_av.max() + 1e-8) +
         wrist_s / (wrist_s.max() + 1e-8) +
@@ -225,36 +224,42 @@ def _detect_launch(
     )
 
     # Walk backward from contact to find where delivery signal drops
-    # below a threshold - that's where the attack acceleration began
+    # below threshold - that's where the attack acceleration began
     search_start = max(start + 1, 0)
     peak_signal = delivery_signal[max(0, contact - 3) : contact + 1].max()
-    launch_threshold = peak_signal * 0.25
+
+    # Use 50% of peak as threshold (higher = finds launch earlier/further from contact)
+    launch_threshold = peak_signal * 0.50
 
     launch = contact - 1
     for i in range(contact - 1, search_start, -1):
         if delivery_signal[i] < launch_threshold:
-            launch = i + 1  # Launch is the frame after signal drops below threshold
+            launch = i + 1
             break
 
-    # If plant is detected and is before launch, prefer plant or plant+1
-    # as launch (the committed attack starts at or just after plant)
-    if plant is not None and plant <= launch:
-        # Launch should be at or just after plant
-        # Use the later of: plant-based launch or signal-based launch
-        plant_launch = plant
-        # Check if there's a clear acceleration onset between plant and
-        # the signal-based launch
-        for i in range(plant, min(launch + 3, contact)):
-            if delivery_signal[i] > launch_threshold:
-                plant_launch = i
-                break
-        launch = min(plant_launch, launch)
+    # Enforce minimum gap: launch must be at least 5% of total swing
+    # duration before contact (prevents launch = contact - 1)
+    total_duration = contact - start
+    min_gap = max(3, int(total_duration * 0.08))
+    if contact - launch < min_gap:
+        launch = contact - min_gap
 
-    # Ensure launch is not too close to or past contact
+    # If plant is detected and is a reasonable launch candidate, use it
+    if plant is not None and start < plant < contact:
+        # Plant is a strong anchor for launch - use it if it's
+        # in a reasonable range (within the last 40% of the swing)
+        swing_progress = (plant - start) / max(total_duration, 1)
+        if swing_progress > 0.4:
+            # Plant is late enough to be a good launch anchor
+            launch = plant
+
+    # Final bounds check
     if launch >= contact:
-        launch = contact - max(1, (contact - start) // 10)
+        launch = contact - min_gap
+    if launch <= start:
+        launch = start + 1
 
-    return max(search_start, launch)
+    return max(search_start, min(launch, contact - 2))
 
 
 def _score_confidence(features: dict, start: int, launch: int, contact: int) -> float:
