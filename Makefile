@@ -1,8 +1,8 @@
 .PHONY: setup db backend worker frontend dev test seed clean
 
-# Detect pip/python commands (macOS uses pip3/python3)
-PIP := $(shell command -v pip3 2>/dev/null || command -v pip 2>/dev/null)
-PYTHON := $(shell command -v python3 2>/dev/null || command -v python 2>/dev/null)
+# Detect pip/python commands (prefer python3.11 on macOS)
+PIP := $(shell command -v pip3.11 2>/dev/null || command -v pip3 2>/dev/null || command -v pip 2>/dev/null)
+PYTHON := $(shell command -v python3.11 2>/dev/null || command -v python3 2>/dev/null || command -v python 2>/dev/null)
 
 # Full setup: install all dependencies
 setup:
